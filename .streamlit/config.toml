@@ -1,0 +1,15 @@
+# config.toml for Path 2
+
+[server]
+runOnSave = true
+[runner]
+fastReruns = true
+[client]
+showErrorDetails = true
+
+[theme]
+base = "dark"
+primaryColor = "#64b5f6"
+backgroundColor = "#0E1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#FAFAFA"
