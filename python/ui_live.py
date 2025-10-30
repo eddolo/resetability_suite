@@ -1,7 +1,7 @@
 # ==========================================================
-# ui_live.py
-# ----------------------------------------------------------
-# Live / Simulation tab for the SO(3) Resetability Control Suite
+# ui_live.py (Version 4 - Final and Complete)
+# ==========================================================
+# Live / Simulation tab for the SO(3) Resetability Control Suite.
 # This module handles UI layout, state management, and calls
 # shared helpers for plotting and analysis.
 # ==========================================================
@@ -24,96 +24,115 @@ from python.ui_helpers import (
     render_status_bar,
 )
 from live_data_logger import get_serial_ports
-
-# --- Import for new feature ---
 from python.report_utils import make_summary, export_pdf
 
 def on_domain_change():
-    """Called when the user selects a new domain."""
-    # The new value is already in session_state thanks to the key='selected_domain'
-    # We just need to update the URL query parameter to match.
+    """Called when the user selects a new domain from the sidebar."""
     st.query_params["domain"] = st.session_state.selected_domain
-    # Reset simulation on switch to avoid confusion
     st.session_state.sim_idx = 0
     st.session_state.running = False
 
+def find_csv_files(directory="data"):
+    """Finds all .csv files in the specified directory."""
+    path = Path(directory)
+    if not path.is_dir():
+        return []
+    return [str(f) for f in path.glob("*.csv")]
+
 # ==========================================================
-# Main renderer
+# Main Renderer
 # ==========================================================
 def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
     ss = st.session_state
 
-    # --- Initialize session state for logger and auto-report ---
-    if 'logger_process' not in ss:
-        ss.logger_process = None
-    if 'serial_ports' not in ss:
-        ss.serial_ports = []
-    if 'last_report_path' in ss and ss.last_report_path:
-        del ss.last_report_path # Clean up old report paths on reload
+    # --- Initialize session state keys ---
+    ss.setdefault('logger_process', None)
+    ss.setdefault('serial_ports', [])
+    if 'last_report_path' in ss:
+        del ss.last_report_path
 
     # --- Handle external replay triggers ---
     if "selected_event" in ss and ss.selected_event:
         evt = ss.selected_event
-        st.info(
-            f"🎞 Replaying logged event from {evt['domain']} at t={evt['timestamp']:.2f}s "
-            f"(R={evt['R']:.4f}, Δθ={evt['predicted_benefit_deg']:.2f}°)"
-        )
+        st.info(f"🎞 Replaying logged event: {evt['domain']} @ t={evt['timestamp']:.2f}s")
         ss.sim_mode = True
         ss.running = False
         ss.selected_domain = evt["domain"]
         ss.last_event_ts = evt["timestamp"]
         del ss.selected_event
 
-    # (This code goes inside the render_live_tab function in python/ui_live.py)
-
     # --- Sidebar Controls ---
     with st.sidebar:
         st.markdown("### Domain")
-        domain_names = list(DOMAIN_MAP.keys())
-
-        # The 'key' parameter is enough. Streamlit will automatically find the correct
-        # index by looking at the value of st.session_state.selected_domain.
-        # This removes the warning.
         st.selectbox(
             "Choose application domain:",
-            domain_names,
+            list(DOMAIN_MAP.keys()),
             key="selected_domain",
             on_change=on_domain_change
         )
-
-        # The rest of the code now reliably uses the value from session_state
         domain_module = DOMAIN_MAP[ss.selected_domain]
         info = getattr(domain_module, "domain_info", lambda: {})()
         st.caption(info.get("description", ""))
         default_file = info.get("default_file", "data/telemetry.csv")
-        if info.get("gravity", False):
-            st.info("🌍 Gravity calibration enabled for this domain.")
+        if info.get("gravity", False): st.info("🌍 Gravity calibration enabled.")
 
-        st.markdown("### Mode")
-        # Added keys to all widgets to make them more robust
-        st.toggle("🧪 Simulation mode (replay CSV)", key='sim_mode')
-        st.text_input("Telemetry CSV path", value=default_file, key='csv_path')
+        st.markdown("### Telemetry Source")
+
+        # Find existing CSV files
+        existing_files = find_csv_files()
+        
+        # Let the user choose the source
+        source_option = st.radio(
+            "Choose data source:",
+            ["Select an existing file", "Upload a new file"],
+            key='source_option'
+        )
+
+        uploaded_file = None
+        if ss.source_option == "Select an existing file":
+            if not existing_files:
+                st.warning("No CSV files found in the 'data/' directory.")
+                st.stop() # Stop execution if no files are available
+            
+            # Use a dropdown for existing files
+            st.selectbox("Select a telemetry file:", existing_files, key='csv_path')
+
+        elif ss.source_option == "Upload a new file":
+            uploaded_file = st.file_uploader(
+                "Upload your telemetry CSV",
+                type=["csv"]
+            )
+            if uploaded_file is not None:
+                # When a file is uploaded, we will use it directly.
+                # The 'path' variable will be handled in the main logic section.
+                ss.csv_path = uploaded_file
+            else:
+                st.info("Please upload a CSV file to begin.")
+                st.stop()
+        
+        st.markdown("### Mode & Analysis")
+        st.toggle("🧪 Simulation mode", key='sim_mode')
         st.slider("Window (samples)", 10, 300, 50, 5, key='window')
         st.slider("Refresh rate [Hz]", 1, 20, 10, key='refresh_hz')
-        st.number_input("Assumed FPS (if no timestamps)", 1, 1000, 10, key='fps_assumed')
+        st.number_input("Assumed FPS", 1, 1000, 10, key='fps_assumed')
 
-        if ss.sim_mode:
+        if ss.get('sim_mode', True):
             st.markdown("---")
             st.markdown("### Simulation Playback")
             st.select_slider("Playback speed", [0.5, 1.0, 2.0, 5.0], 1.0, key='speed')
             st.toggle("⏸ Pause on reset opportunity", True, key='pause_on_reset')
-            adaptive_window = st.toggle("🧠 Adaptive window (seconds)", False, key='adaptive_window')
-            st.slider("Window (sec)", 0.05, 5.0, 0.5, 0.05, disabled=not adaptive_window, key='window_seconds')
+            st.toggle("🧠 Adaptive window", False, key='adaptive_window')
+            st.slider("Window (sec)", 0.05, 5.0, 0.5, 0.05, disabled=not ss.get('adaptive_window', False), key='window_seconds')
+        else:
+            ss.setdefault('speed', 1.0)
+            ss.setdefault('pause_on_reset', False)
+            ss.setdefault('adaptive_window', False)
+            ss.setdefault('window_seconds', 0.5)
 
-        # --- Live Data Logger UI Section ---
         st.markdown("---")
         st.markdown("### 🛰️ Live Data Logger")
         if st.button("Scan for Serial Ports"):
-            with st.spinner("Scanning..."):
-                ss.serial_ports = get_serial_ports()
-                if not ss.serial_ports: st.warning("No serial ports found.")
-                else: st.success(f"Found ports: {', '.join(ss.serial_ports)}")
-
+            with st.spinner("Scanning..."): ss.serial_ports = get_serial_ports()
         if ss.serial_ports:
             selected_port = st.selectbox("Select Port", ss.serial_ports)
             c1, c2 = st.columns(2)
@@ -121,98 +140,104 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
                 if ss.logger_process is None:
                     cmd = [sys.executable, "live_data_logger.py", "--port", selected_port]
                     ss.logger_process = subprocess.Popen(cmd)
-                    st.success(f"Started logging from {selected_port}"); st.rerun()
-                else: st.warning("Logger is already running.")
+                    st.success(f"Logging from {selected_port}"); st.rerun()
             if c2.button("⏹️ Stop Logging"):
                 if ss.logger_process is not None:
                     ss.logger_process.terminate(); ss.logger_process = None
                     st.info("Logger stopped."); st.rerun()
-                else: st.warning("Logger is not running.")
-        else: st.caption("Click 'Scan' to find connected devices.")
-        if ss.logger_process is not None: st.success(f"🟢 Logging active (PID: {ss.logger_process.pid})")
+        if ss.logger_process: st.success(f"🟢 Logging active (PID: {ss.logger_process.pid})")
         else: st.info("⚪ Logger inactive.")
 
-        # --- Simulation Controls ---
         st.markdown("---")
         st.markdown("### 🔬 Simulation Controls")
         c1, c2, c3 = st.columns(3)
         start = c1.button("▶ Start")
         pause = c2.button("⏸ Pause")
         reset = c3.button("⏹ Stop")
-        auto_report = st.toggle("📄 Auto-generate report on stop", value=True)
+        st.toggle("📄 Auto-generate report on stop", value=True, key='auto_report')
 
-    # --- Load Data ---
-    # Get the path from session_state, using the key we assigned in the sidebar
+    # --- Retrieve all values from session state for use in logic ---
     path = ss.csv_path
-    file = Path(path)
-    if not file.exists():
-        st.warning(f"Waiting for file: {file.resolve()}")
-        st.stop()
-    full_df = load_domain_telemetry(domain_module, path)
-    if full_df.empty: st.warning("No data loaded yet — waiting for telemetry..."); st.stop()
-
-    # --- Simulation or Live Mode Logic ---
-    if "timestamp" in full_df.columns and len(full_df) > 1:
-        src_hz = 1.0 / max(np.median(np.diff(full_df["timestamp"].values)), 1e-6)
-    else: src_hz = float(fps_assumed)
-    # Retrieve widget values from session_state using their keys
-    adaptive_window = ss.adaptive_window
     window = ss.window
-    window_seconds = ss.window_seconds
-    speed = ss.speed
     refresh_hz = ss.refresh_hz
     fps_assumed = ss.fps_assumed
-    pause_on_reset = ss.pause_on_reset
+    sim_mode = ss.sim_mode
+    speed = ss.get('speed', 1.0)
+    pause_on_reset = ss.get('pause_on_reset', False)
+    adaptive_window = ss.get('adaptive_window', False)
+    window_seconds = ss.get('window_seconds', 0.5)
+    auto_report = ss.get('auto_report', True)
+
+    # --- Load Data ---
+    # The 'path' variable now comes from session_state, set by the new file handler
+    path_or_buffer = ss.csv_path
     
-    eff_window = (
-        int(max(10, round(window_seconds * src_hz))) if adaptive_window else int(window)
-    )
+    # The load_domain_telemetry function can accept a path OR an uploaded file object
+    full_df = load_domain_telemetry(domain_module, path_or_buffer)
+    
+    if full_df.empty:
+        # Give a more specific message if waiting for an upload
+        if ss.source_option == "Upload a new file" and uploaded_file is None:
+             st.info("Waiting for file upload...")
+        else:
+             st.warning("No data loaded yet or file is empty.")
+        st.stop()
 
-    if ss.sim_mode:
-        if ss.running:
-            frames_per_tick = max(1, int(round(src_hz * speed / refresh_hz)))
-            ss.sim_idx = (ss.sim_idx + frames_per_tick) % (len(full_df) + 1)
-        view_df = full_df.iloc[:max(2, ss.sim_idx)].copy()
-    else: view_df = full_df.copy()
-
-    # --- Button actions & Auto-Report Logic ---
+    # --- Button actions & State Update Logic ---
     if start: ss.running = True; st.rerun()
     if pause: ss.running = False; st.rerun()
     if reset:
         was_running = ss.running
         ss.running = False
-        if was_running and auto_report and not view_df.empty:
+        if was_running and auto_report and not full_df.empty:
             st.toast("⚙️ Generating final mission summary...")
-            final_results, _ = analyze_from_quats(view_df, window=eff_window, fps=int(fps_assumed))
+            sim_df_final = full_df.iloc[:max(2, ss.sim_idx)].copy()
+            eff_window_final = int(max(10, round(window_seconds * (1/max(np.median(np.diff(sim_df_final["timestamp"].values)), 1e-6))))) if adaptive_window else int(window)
+            final_results, _ = analyze_from_quats(sim_df_final, window=eff_window_final, fps=int(fps_assumed))
             if not final_results.empty:
+                final_candidates = final_results[(final_results["R"] < 0.05) & (final_results["predicted_benefit_deg"] > 0)]
                 summary_data = make_summary(final_results)
                 report_path = Path("results/mission_summary.pdf")
                 report_path.parent.mkdir(parents=True, exist_ok=True)
-                export_pdf(summary_data, str(report_path))
+                export_pdf(summary_data, final_results, final_candidates, str(report_path))
                 ss.last_report_path = str(report_path)
                 st.sidebar.success("Report saved!")
             else: st.sidebar.warning("Not enough data for report.")
         ss.sim_idx = 0; ss.last_event_ts = -1e18
         st.rerun()
+    
+    # --- Simulation Progression ---
+    view_df = full_df.copy() # Default to full data for Live Mode
+    if sim_mode:
+        if ss.running:
+            src_hz = 1.0 / max(np.median(np.diff(full_df["timestamp"].values)), 1e-6) if "timestamp" in full_df.columns and len(full_df) > 1 else float(fps_assumed)
+            frames_per_tick = max(1, int(round(speed * src_hz / refresh_hz)))
+            ss.sim_idx += frames_per_tick
+            if ss.sim_idx >= len(full_df):
+                ss.sim_idx = len(full_df)
+                ss.running = False
+                st.toast("✅ Simulation finished!")
+        view_df = full_df.iloc[:max(2, ss.sim_idx)].copy()
 
-    # --- Display Download Button for Auto-Report ---
+    # --- Display Download Button ---
     if 'last_report_path' in ss and ss.last_report_path:
         with open(ss.last_report_path, "rb") as f:
             st.sidebar.download_button("📥 Download Last Report", f, "mission_summary.pdf", "application/pdf")
         del ss.last_report_path
 
-    # --- Handle replay jump ---
+    # --- Handle Replay Jump ---
     if "last_event_ts" in ss and ss.last_event_ts > 0 and "timestamp" in full_df.columns:
         closest_idx = (full_df["timestamp"] - ss.last_event_ts).abs().idxmin()
         ss.sim_idx = max(2, int(closest_idx))
 
-    # --- Render Status Bar & Main UI ---
-    render_status_bar(st, ss.selected_domain, DOMAIN_COLORS, ss.sim_mode, ss.running, ss.sim_idx, len(full_df))
+    # --- Render Main UI ---
+    render_status_bar(st, ss.selected_domain, DOMAIN_COLORS, sim_mode, ss.running, ss.sim_idx, len(full_df))
     st.markdown("### Plot Smoothing")
-    smooth_mode = st.selectbox("Method", ["None", "Rolling Mean", "Exponential Filter (EWMA)"], index=0, key='smooth_mode')
-    smooth_strength = st.slider("Strength", 1, 50, 10, key='smooth_strength')
+    st.selectbox("Method", ["None", "Rolling Mean", "Exponential Filter (EWMA)"], key='smooth_mode')
+    st.slider("Strength", 1, 50, 10, key='smooth_strength')
 
     # --- Analysis ---
+    eff_window = int(max(10, round(window_seconds * (1.0 / max(np.median(np.diff(view_df["timestamp"].values)), 1e-6) if "timestamp" in view_df.columns and len(view_df) > 1 else float(fps_assumed))))) if adaptive_window else int(window)
     results_df, candidates_df = analyze_from_quats(view_df, window=eff_window, fps=int(fps_assumed))
 
     # --- Auto-pause & Log ---
@@ -231,9 +256,9 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
     col_main, col_3d = st.columns([1.2, 1])
     with col_main:
         highlight_ts = ss.last_event_ts if ss.last_event_ts > 0 else None
-        plot_metrics(results_df, candidates_df, highlight_ts, smooth_mode, smooth_strength, 20)
+        plot_metrics(results_df, candidates_df, highlight_ts, ss.smooth_mode, ss.smooth_strength, 20)
         if highlight_ts: ss.last_event_ts = -1e18
-        if ss.sim_mode:
+        if sim_mode:
             pct = 100.0 * ss.sim_idx / max(1, len(full_df))
             st.progress(pct / 100.0, text=f"Timeline: {pct:.1f}% of run")
 
@@ -241,10 +266,9 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
         if not view_df.empty:
             qw, qx, qy, qz = view_df[["qw", "qx", "qy", "qz"]].iloc[-1].tolist()
             st.plotly_chart(cached_3d_figure(qw, qx, qy, qz), width='stretch')
-        else:  # Default cube
-            st.plotly_chart(cached_3d_figure(1, 0, 0, 0), width='stretch')
+        else: st.plotly_chart(cached_3d_figure(1, 0, 0, 0), width='stretch')
 
-    # --- Bottom metrics and data ---
+    # --- Bottom Metrics ---
     m_r, m_th, m_ben, m_w = st.columns(4)
     m_r.metric("Mean R", f"{results_df['R'].mean():.6f}" if not results_df.empty else "N/A")
     m_th.metric("Mean θ_net [deg]", f"{results_df['theta_net_deg'].mean():.3f}" if not results_df.empty else "N/A")
@@ -255,7 +279,7 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
     if not candidates_df.empty: st.dataframe(candidates_df.tail(10), width='stretch', height=240)
     else: st.info("No reset opportunities detected yet.")
 
-    # --- Auto-refresh trigger ---
+    # --- Auto-refresh Trigger ---
     if ss.running:
         time.sleep(max(0.02, 1.0 / refresh_hz))
         st.rerun()

@@ -91,21 +91,24 @@ def render_analysis_tab(st, DOMAIN_COLORS):
             st.warning("No data to generate a report from. Please adjust filters.")
         else:
             with st.spinner("Creating PDF report..."):
-                # 1. Create the summary dictionary using the utility
-                summary_data = make_summary(df_filtered)
+                # 1. The 'df_filtered' DataFrame contains all the event data, which can
+                #    serve as both our results and candidates for the plot.
+                report_results_df = df_filtered
+                report_candidates_df = df_filtered # We want to plot all filtered events as "opportunities"
 
-                # 2. Define the output path and ensure the directory exists
+                # 2. Create the summary dictionary
+                summary_data = make_summary(report_results_df)
+                
+                # 3. Define the output path
                 report_path = Path("results/analysis_report.pdf")
                 report_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # 4. Export the PDF with the required dataframes
+                export_pdf(summary_data, report_results_df, report_candidates_df, str(report_path))
+                
+                st.success(f"✅ Report successfully generated and saved to `{report_path}`")
 
-                # 3. Export the PDF
-                export_pdf(summary_data, str(report_path))
-
-                st.success(
-                    f"✅ Report successfully generated and saved to `{report_path}`"
-                )
-
-                # 4. Offer the generated file for download
+                # 5. Offer the generated file for download
                 with open(report_path, "rb") as f:
                     st.download_button(
                         label="📥 Download PDF Report",
