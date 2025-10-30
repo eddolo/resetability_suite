@@ -1,0 +1,17 @@
+# Core application framework
+streamlit==1.51.0
+
+# Data manipulation and numerical operations
+pandas>=2.0
+numpy>=1.24
+scipy>=1.10
+
+# Plotting and visualization
+matplotlib>=3.7
+plotly>=5.15
+
+# PDF report generation
+reportlab>=4.0
+
+# Serial communication for live data logging
+pyserial>=3.5
