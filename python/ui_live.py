@@ -54,12 +54,19 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
     # --- Handle external replay triggers ---
     if "selected_event" in ss and ss.selected_event:
         evt = ss.selected_event
-        st.info(f"🎞 Replaying logged event: {evt['domain']} @ t={evt['timestamp']:.2f}s")
+        
+        # --- THIS IS THE FIX ---
+        # Display a clear, helpful message telling the user what to do next.
+        st.info(f"🎞️ **Replay Mode:** Paused at t={evt['timestamp']:.2f}s. The plot below shows the state at this moment. Press '▶ Start' to continue playback from here.", icon="▶️")
+
         ss.sim_mode = True
         ss.running = False
         ss.selected_domain = evt["domain"]
         ss.last_event_ts = evt["timestamp"]
-        del ss.selected_event
+        
+        # Find the index in the dataframe that corresponds to the event time
+        # This requires the dataframe to be loaded first. We will move this logic down.
+        # del ss.selected_event # We'll delete this later
 
     # --- Sidebar Controls ---
     with st.sidebar:
@@ -73,42 +80,19 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
         domain_module = DOMAIN_MAP[ss.selected_domain]
         info = getattr(domain_module, "domain_info", lambda: {})()
         st.caption(info.get("description", ""))
-        default_file = info.get("default_file", "data/telemetry.csv")
         if info.get("gravity", False): st.info("🌍 Gravity calibration enabled.")
 
         st.markdown("### Telemetry Source")
-
-        # Find existing CSV files
-        existing_files = find_csv_files()
-        
-        # Let the user choose the source
-        source_option = st.radio(
-            "Choose data source:",
-            ["Select an existing file", "Upload a new file"],
-            key='source_option'
-        )
-
+        source_option = st.radio("Choose data source:", ["Select an existing file", "Upload a new file"], key='source_option')
         uploaded_file = None
         if ss.source_option == "Select an existing file":
-            if not existing_files:
-                st.warning("No CSV files found in the 'data/' directory.")
-                st.stop() # Stop execution if no files are available
-            
-            # Use a dropdown for existing files
+            existing_files = find_csv_files()
+            if not existing_files: st.warning("No CSV files found in 'data/' directory."); st.stop()
             st.selectbox("Select a telemetry file:", existing_files, key='csv_path')
-
         elif ss.source_option == "Upload a new file":
-            uploaded_file = st.file_uploader(
-                "Upload your telemetry CSV",
-                type=["csv"]
-            )
-            if uploaded_file is not None:
-                # When a file is uploaded, we will use it directly.
-                # The 'path' variable will be handled in the main logic section.
-                ss.csv_path = uploaded_file
-            else:
-                st.info("Please upload a CSV file to begin.")
-                st.stop()
+            uploaded_file = st.file_uploader("Upload your telemetry CSV", type=["csv"])
+            if uploaded_file: ss.csv_path = uploaded_file
+            else: st.info("Please upload a CSV file to begin."); st.stop()
         
         st.markdown("### Mode & Analysis")
         st.toggle("🧪 Simulation mode", key='sim_mode')
@@ -120,15 +104,16 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
             st.markdown("---")
             st.markdown("### Simulation Playback")
             st.select_slider("Playback speed", [0.5, 1.0, 2.0, 5.0], 1.0, key='speed')
-            st.toggle("⏸ Pause on reset opportunity", True, key='pause_on_reset')
             st.toggle("🧠 Adaptive window", False, key='adaptive_window')
             st.slider("Window (sec)", 0.05, 5.0, 0.5, 0.05, disabled=not ss.get('adaptive_window', False), key='window_seconds')
-        else:
-            ss.setdefault('speed', 1.0)
-            ss.setdefault('pause_on_reset', False)
-            ss.setdefault('adaptive_window', False)
-            ss.setdefault('window_seconds', 0.5)
+        
+        # --- NEW: Decoupled Event Handling Toggles ---
+        st.markdown("---")
+        st.markdown("### Event Handling")
+        st.toggle("📄 Log reset opportunities", value=True, key='log_events', help="When enabled, all detected reset opportunities will be saved to results/reset_events.csv.")
+        st.toggle("⏸ Pause on reset opportunity", value=True, key='pause_on_reset', help="When enabled, the simulation will pause when the first new reset opportunity is detected.")
 
+        # --- Live Data Logger UI Section (Unchanged) ---
         st.markdown("---")
         st.markdown("### 🛰️ Live Data Logger")
         if st.button("Scan for Serial Ports"):
@@ -148,13 +133,14 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
         if ss.logger_process: st.success(f"🟢 Logging active (PID: {ss.logger_process.pid})")
         else: st.info("⚪ Logger inactive.")
 
+        # --- Simulation Controls (Unchanged) ---
         st.markdown("---")
         st.markdown("### 🔬 Simulation Controls")
         c1, c2, c3 = st.columns(3)
         start = c1.button("▶ Start")
         pause = c2.button("⏸ Pause")
         reset = c3.button("⏹ Stop")
-        st.toggle("📄 Auto-generate report on stop", value=True, key='auto_report')
+        st.toggle("📋 Auto-generate report on stop", value=True, key='auto_report')
 
     # --- Retrieve all values from session state for use in logic ---
     path = ss.csv_path
@@ -189,21 +175,16 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
     if reset:
         was_running = ss.running
         ss.running = False
-        
-        # We need the `view_df` from just before the reset
         current_view_df = full_df.iloc[:max(2, ss.sim_idx)].copy() if sim_mode else full_df.copy()
 
         if was_running and auto_report and not current_view_df.empty:
             st.toast("⚙️ Generating final mission summary...")
-
-            # Re-run analysis on the final data from the run
             final_results, final_candidates = analyze_from_quats(current_view_df, window=eff_window, fps=int(fps_assumed))
             
             if not final_results.empty:
                 report_path = Path("results/mission_summary.pdf")
-                report_path.parent.mkdir(parents=True, exist_ok=True)
                 
-                # The export_pdf handles the summary creation internally.
+                # --- SIMPLIFIED & CORRECTED CALL ---
                 export_pdf(final_results, final_candidates, str(report_path))
                 
                 ss.last_report_path = str(report_path)
@@ -235,9 +216,17 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
         del ss.last_report_path
 
     # --- Handle Replay Jump ---
-    if "last_event_ts" in ss and ss.last_event_ts > 0 and "timestamp" in full_df.columns:
-        closest_idx = (full_df["timestamp"] - ss.last_event_ts).abs().idxmin()
-        ss.sim_idx = max(2, int(closest_idx))
+    if "selected_event" in ss and ss.selected_event and "timestamp" in full_df.columns:
+        # Find the index that corresponds to the event time
+        closest_idx = (full_df["timestamp"] - ss.selected_event['timestamp']).abs().idxmin()
+        
+        # --- THIS IS THE FIX for the "No Data" bug ---
+        # Ensure the simulation index is at least one window size, so the plot has data.
+        window_size = ss.get('window', 50)
+        ss.sim_idx = max(window_size + 1, int(closest_idx))
+        
+        # Now that we've processed the event, we can clear it.
+        del ss.selected_event
 
     # --- Render Main UI ---
     render_status_bar(st, ss.selected_domain, DOMAIN_COLORS, sim_mode, ss.running, ss.sim_idx, len(full_df))
@@ -249,17 +238,34 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
     eff_window = int(max(10, round(window_seconds * (1.0 / max(np.median(np.diff(view_df["timestamp"].values)), 1e-6) if "timestamp" in view_df.columns and len(view_df) > 1 else float(fps_assumed))))) if adaptive_window else int(window)
     results_df, candidates_df = analyze_from_quats(view_df, window=eff_window, fps=int(fps_assumed))
 
-    # --- Auto-pause & Log ---
-    if pause_on_reset and not candidates_df.empty and ss.running:
-        latest_ts = float(candidates_df["timestamp"].max())
-        if latest_ts > ss.get("last_event_ts", -1e18):
-            last_row = candidates_df.loc[candidates_df["timestamp"] == latest_ts].iloc[-1]
-            if "event_logger" not in ss: ss.event_logger = EventLogger()
-            log_path = ss.event_logger.log(ts=latest_ts, domain=ss.selected_domain, R=float(last_row["R"]),
-                                           theta_deg=float(last_row["theta_net_deg"]),
-                                           benefit_deg=float(last_row["predicted_benefit_deg"]))
-            ss.running = False; ss.last_event_ts = latest_ts
-            st.success(f"⏸ Paused at reset opportunity (t={latest_ts:.3f}s). Event logged → {log_path}")
+    # --- Decoupled Logging and Pausing Logic ---
+    if not candidates_df.empty and ss.running:
+        # Get the latest detected opportunity
+        latest_candidate = candidates_df.iloc[-1]
+        latest_ts = latest_candidate['timestamp']
+
+        # This check prevents handling the same event multiple times on fast reruns
+        if latest_ts > ss.get('last_event_ts', -1e18):
+            
+            # --- Logging Logic (controlled by the new 'log_events' toggle) ---
+            if ss.get('log_events', True):
+                if "event_logger" not in ss: ss.event_logger = EventLogger()
+                ss.event_logger.log(
+                    ts=latest_ts,
+                    domain=ss.selected_domain,
+                    R=float(latest_candidate["R"]),
+                    theta_deg=float(latest_candidate["theta_net_deg"]),
+                    benefit_deg=float(latest_candidate["predicted_benefit_deg"])
+                )
+                st.toast(f"📄 Event logged at t={latest_ts:.2f}s")
+
+            # --- Pausing Logic (controlled by the 'pause_on_reset' toggle) ---
+            if ss.get('pause_on_reset', True):
+                ss.running = False
+                st.success(f"⏸ Paused at reset opportunity (t={latest_ts:.3f}s)")
+            
+            # Update the debounce tracker to prevent re-logging the same event
+            ss.last_event_ts = latest_ts
 
     # --- Layout & Display ---
     col_main, col_3d = st.columns([1.2, 1])

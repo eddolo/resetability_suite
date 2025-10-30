@@ -1,18 +1,16 @@
 # ==========================================================
-# ui_montecarlo.py
-# ----------------------------------------------------------
+# ui_montecarlo.py (Final, Complete, and Verified)
+# ==========================================================
 # Monte Carlo Resetability Simulation
 # ==========================================================
 
 from pathlib import Path
-
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
-# --- NEW: Import the report generation utilities ---
-from python.report_utils import export_pdf, make_summary
-
+# --- Import from the final, robust report utility ---
+from python.report_utils import export_pdf
 
 # ==========================================================
 # Main Renderer
@@ -24,7 +22,6 @@ def render_montecarlo_tab(st):
 
     try:
         from python.montecarlo_robot import run_montecarlo, summarize_results
-
         st.caption("✅ Monte Carlo module loaded successfully.")
     except Exception as e:
         st.error(f"Could not import Monte Carlo module → {e}")
@@ -37,16 +34,17 @@ def render_montecarlo_tab(st):
         )
 
     with st.expander("⚙️ Simulation Settings", expanded=True):
-        n_runs = st.slider("Number of runs", 50, 2000, 200, step=50)
-        n_steps = st.slider("Steps per run", 20, 200, 80, step=10)
-        noise_sigma = st.number_input("Noise σ (radians)", 0.0, 0.1, 0.02, step=0.005)
-        seed = st.number_input("Random seed", 0, 9999, 0)
+        n_runs = st.slider("Number of runs", 50, 2000, 200, step=50, key="mc_runs")
+        n_steps = st.slider("Steps per run", 20, 200, 80, step=10, key="mc_steps")
+        noise_sigma = st.number_input("Noise σ (radians)", 0.0, 0.1, 0.02, step=0.005, key="mc_noise")
+        seed = st.number_input("Random seed", 0, 9999, 0, key="mc_seed")
         run_btn = st.button("▶ Run Simulation", width='stretch')
 
     if run_btn:
         with st.spinner("Running Monte Carlo simulations..."):
             try:
-                df = cached_montecarlo(n_runs, n_steps, noise_sigma, seed)
+                # Use the keys to get the values from session state
+                df = cached_montecarlo(st.session_state.mc_runs, st.session_state.mc_steps, st.session_state.mc_noise, st.session_state.mc_seed)
                 summary = summarize_results(df)
             except Exception as e:
                 st.error(f"Simulation failed: {e}")
@@ -54,22 +52,30 @@ def render_montecarlo_tab(st):
 
         st.success("✅ Simulation complete!")
 
-        # --- Summary metrics, JSON, and Plots ---
-        # (No changes here)
         st.markdown("### 📊 Summary Statistics")
-        # ... metrics ...
+        c = st.columns(4)
+        c[0].metric("Runs", st.session_state.mc_runs)
+        c[1].metric("Steps per run", st.session_state.mc_steps)
+        c[2].metric("Mean R", f"{df['R'].mean():.4f}")
+        c[3].metric("Mean Δθ [deg]", f"{df['predicted_benefit_deg'].mean():.2f}")
+
         st.subheader("📄 Summary (JSON)")
-        # ... json display ...
+        st.json(summary)
+
         st.subheader("📈 Distributions")
-        # ... plots ...
+        fig, ax = plt.subplots(1, 3, figsize=(12, 3))
+        ax[0].hist(df["R"], bins=30, color="blue", alpha=0.7); ax[0].set_title("R Distribution")
+        ax[1].hist(df["theta_net_deg"], bins=30, color="orange", alpha=0.7); ax[1].set_title("θ_net [deg]")
+        ax[2].hist(df["predicted_benefit_deg"], bins=30, color="green", alpha=0.7); ax[2].set_title("Predicted Benefit [deg]")
+        plt.tight_layout(); st.pyplot(fig, clear_figure=True)
 
         # ==========================================================
-        # NEW & UPDATED: Export Section
+        # Corrected Export Section
         # ==========================================================
         st.markdown("---")
         st.subheader("💾 Export Results")
 
-        # --- Existing CSV Export ---
+        # --- CSV Export ---
         csv_path = Path("results") / "montecarlo_results.csv"
         csv_path.parent.mkdir(exist_ok=True)
         df.to_csv(csv_path, index=False)
@@ -83,20 +89,15 @@ def render_montecarlo_tab(st):
                 width='stretch',
             )
 
-        # --- New PDF Report Export ---
+        # --- PDF Report Export ---
         st.markdown("---")
-        st.info("📜 A formal PDF summary can also be generated.")
-
-        # 1. Create summary data
-        summary_data = make_summary(df)
-
-        # 2. Define output path
         report_path = Path("results/montecarlo_report.pdf")
-
-        # 3. Export PDF
-        export_pdf(summary_data, str(report_path))
-
-        # 4. Offer for download
+        
+        # The new export_pdf handles all summarizing and plotting internally.
+        # For Monte Carlo data, the results and candidates are the same dataframe 'df'.
+        export_pdf(df, df, str(report_path))
+        
+        st.info(f"📜 PDF report saved to `{report_path}`")
         with open(report_path, "rb") as f:
             st.download_button(
                 label="📥 Download PDF Report",
@@ -105,6 +106,6 @@ def render_montecarlo_tab(st):
                 mime="application/pdf",
                 width='stretch',
             )
-
+            
     else:
         st.info("Adjust parameters above, then click ▶ Run Simulation to begin.")
