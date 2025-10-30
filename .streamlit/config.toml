@@ -1,4 +1,4 @@
-# config.toml for Path 2
+# config.toml
 
 [server]
 runOnSave = true
