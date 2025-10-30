@@ -24,7 +24,7 @@ from python.ui_helpers import (
     render_status_bar,
 )
 from live_data_logger import get_serial_ports
-from python.report_utils import make_summary, export_pdf
+from python.report_utils import export_pdf
 
 def on_domain_change():
     """Called when the user selects a new domain from the sidebar."""
@@ -189,21 +189,30 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
     if reset:
         was_running = ss.running
         ss.running = False
-        if was_running and auto_report and not full_df.empty:
+        
+        # We need the `view_df` from just before the reset
+        current_view_df = full_df.iloc[:max(2, ss.sim_idx)].copy() if sim_mode else full_df.copy()
+
+        if was_running and auto_report and not current_view_df.empty:
             st.toast("⚙️ Generating final mission summary...")
-            sim_df_final = full_df.iloc[:max(2, ss.sim_idx)].copy()
-            eff_window_final = int(max(10, round(window_seconds * (1/max(np.median(np.diff(sim_df_final["timestamp"].values)), 1e-6))))) if adaptive_window else int(window)
-            final_results, _ = analyze_from_quats(sim_df_final, window=eff_window_final, fps=int(fps_assumed))
+
+            # Re-run analysis on the final data from the run
+            final_results, final_candidates = analyze_from_quats(current_view_df, window=eff_window, fps=int(fps_assumed))
+            
             if not final_results.empty:
-                final_candidates = final_results[(final_results["R"] < 0.05) & (final_results["predicted_benefit_deg"] > 0)]
-                summary_data = make_summary(final_results)
                 report_path = Path("results/mission_summary.pdf")
                 report_path.parent.mkdir(parents=True, exist_ok=True)
-                export_pdf(summary_data, final_results, final_candidates, str(report_path))
+                
+                # The export_pdf handles the summary creation internally.
+                export_pdf(final_results, final_candidates, str(report_path))
+                
                 ss.last_report_path = str(report_path)
                 st.sidebar.success("Report saved!")
-            else: st.sidebar.warning("Not enough data for report.")
-        ss.sim_idx = 0; ss.last_event_ts = -1e18
+            else:
+                st.sidebar.warning("Not enough data for report.")
+
+        ss.sim_idx = 0
+        ss.last_event_ts = -1e18
         st.rerun()
     
     # --- Simulation Progression ---
