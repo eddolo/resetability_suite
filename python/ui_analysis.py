@@ -70,7 +70,7 @@ def render_analysis_tab(st, DOMAIN_COLORS):
     st.markdown("---")
     st.markdown("### 📋 Summary by Domain")
     summary_table = make_summary_table(df_filtered)
-    st.dataframe(summary_table, use_container_width='stretch')
+    st.dataframe(summary_table, width='stretch')
 
     # --- JSON Export ---
     # (No changes here)
@@ -86,7 +86,7 @@ def render_analysis_tab(st, DOMAIN_COLORS):
         "Generate a formal PDF summary of the filtered reset events shown above."
     )
 
-    if st.button("Generate Report", use_container_width='stretch'):
+    if st.button("Generate Report", width='stretch'):
         if df_filtered.empty:
             st.warning("No data to generate a report from. Please adjust filters.")
         else:
@@ -112,5 +112,5 @@ def render_analysis_tab(st, DOMAIN_COLORS):
                         data=f.read(),
                         file_name="analysis_report.pdf",
                         mime="application/pdf",
-                        use_container_width='stretch',
+                        width='stretch',
                     )

@@ -252,7 +252,7 @@ def render_live_tab(st, DOMAIN_MAP, DOMAIN_COLORS):
     if all(c in view_df.columns for c in ["wx", "wy", "wz"]):
         mean_w = np.nanmean(np.linalg.norm(view_df[["wx", "wy", "wz"]].to_numpy(), axis=1))
         m_w.metric("Mean |ω| [rad/s]", f"{mean_w:.3f}")
-    if not candidates_df.empty: st.dataframe(candidates_df.tail(10), use_container_width='stretch', height=240)
+    if not candidates_df.empty: st.dataframe(candidates_df.tail(10), width='stretch', height=240)
     else: st.info("No reset opportunities detected yet.")
 
     # --- Auto-refresh trigger ---
