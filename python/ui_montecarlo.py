@@ -41,7 +41,7 @@ def render_montecarlo_tab(st):
         n_steps = st.slider("Steps per run", 20, 200, 80, step=10)
         noise_sigma = st.number_input("Noise σ (radians)", 0.0, 0.1, 0.02, step=0.005)
         seed = st.number_input("Random seed", 0, 9999, 0)
-        run_btn = st.button("▶ Run Simulation", use_container_width=True)
+        run_btn = st.button("▶ Run Simulation", use_container_width='stretch')
 
     if run_btn:
         with st.spinner("Running Monte Carlo simulations..."):
@@ -80,7 +80,7 @@ def render_montecarlo_tab(st):
                 data=f.read(),
                 file_name="montecarlo_results.csv",
                 mime="text/csv",
-                use_container_width=True,
+                use_container_width='stretch',
             )
 
         # --- New PDF Report Export ---
@@ -103,7 +103,7 @@ def render_montecarlo_tab(st):
                 data=f.read(),
                 file_name="montecarlo_report.pdf",
                 mime="application/pdf",
-                use_container_width=True,
+                use_container_width='stretch',
             )
 
     else:
